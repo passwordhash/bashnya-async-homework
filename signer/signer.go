@@ -69,12 +69,12 @@ func SingleHash(in, out chan any) {
 	wg.Wait()
 }
 
-func MultiHash(in, out chan any) {
-	type hashResult struct {
-		index int
-		value string
-	}
+type hashResult struct {
+	index int
+	value string
+}
 
+func MultiHash(in, out chan any) {
 	wg := &sync.WaitGroup{}
 
 	for val := range in {
@@ -85,11 +85,8 @@ func MultiHash(in, out chan any) {
 			defer wg.Done()
 
 			results := make([]string, thRange)
-
 			hashChan := make(chan hashResult, thRange)
-
 			hashWG := &sync.WaitGroup{}
-
 			for i := 0; i < thRange; i++ {
 				hashWG.Add(1)
 
@@ -111,7 +108,6 @@ func MultiHash(in, out chan any) {
 
 			res := strings.Join(results, "")
 			out <- res
-
 		}(data)
 	}
 
