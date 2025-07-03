@@ -8,24 +8,20 @@ import (
 	"sync"
 )
 
-const thRange = 6
-
-var tokens = make(chan struct{}, 1)
-
 func ExecutePipeline(jobs ...job) {
 	in := make(chan any)
 	wg := &sync.WaitGroup{}
 
 	for _, j := range jobs {
 		j := j
-		out := make(chan any, 1)
+		out := make(chan any)
 
 		wg.Add(1)
-		go func(in, out chan any, wg *sync.WaitGroup) {
+		go func(in, out chan any) {
 			defer wg.Done()
 			j(in, out)
 			close(out)
-		}(in, out, wg)
+		}(in, out)
 
 		in = out
 	}
@@ -43,24 +39,24 @@ func SingleHash(in, out chan any) {
 		go func(data string) {
 			defer wg.Done()
 
-			crc32 := make(chan string)
-			md5 := make(chan string)
-			crc32second := make(chan string)
+			crc32Ch := make(chan string, 1)
+			md5Ch := make(chan string, 1)
+			crc32md5Ch := make(chan string, 1)
 
 			go func() {
-				crc32 <- DataSignerCrc32(data)
+				crc32Ch <- DataSignerCrc32(data)
 			}()
 
 			go func() {
-				md5 <- dataSignerMd5Safe(data)
+				md5Ch <- dataSignerMd5Safe(data)
 			}()
 
 			go func() {
-				hash := DataSignerCrc32(<-md5)
-				crc32second <- hash
+				hash := DataSignerCrc32(<-md5Ch)
+				crc32md5Ch <- hash
 			}()
 
-			res := fmt.Sprintf("%s~%s", <-crc32, <-crc32second)
+			res := fmt.Sprintf("%s~%s", <-crc32Ch, <-crc32md5Ch)
 
 			out <- res
 		}(data)
@@ -74,13 +70,15 @@ type hashResult struct {
 	value string
 }
 
+const thRange = 6
+
 func MultiHash(in, out chan any) {
 	wg := &sync.WaitGroup{}
 
 	for val := range in {
-		data := val.(string)
-		wg.Add(1)
+		data := fmt.Sprintf("%v", val)
 
+		wg.Add(1)
 		go func(data string) {
 			defer wg.Done()
 
@@ -89,7 +87,6 @@ func MultiHash(in, out chan any) {
 			hashWG := &sync.WaitGroup{}
 			for i := 0; i < thRange; i++ {
 				hashWG.Add(1)
-
 				go func(index int) {
 					defer hashWG.Done()
 					hash := DataSignerCrc32(strconv.Itoa(index) + data)
@@ -117,7 +114,7 @@ func MultiHash(in, out chan any) {
 func CombineResults(in, out chan any) {
 	buf := make([]string, 0, 10)
 	for val := range in {
-		data := val.(string)
+		data := fmt.Sprintf("%v", val)
 		buf = append(buf, data)
 	}
 
@@ -126,10 +123,10 @@ func CombineResults(in, out chan any) {
 	out <- strings.Join(buf, "_")
 }
 
+var tokens = make(chan struct{}, 1)
+
 func dataSignerMd5Safe(data string) string {
 	tokens <- struct{}{}
-	d := DataSignerMd5(data)
-	<-tokens
-
-	return d
+	defer func() { <-tokens }()
+	return DataSignerMd5(data)
 }
